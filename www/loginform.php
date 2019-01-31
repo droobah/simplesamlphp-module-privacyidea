@@ -111,6 +111,7 @@ if (!empty($_REQUEST['username']) || !empty($password)) {
             $transaction_id = $errorParams[1];
             $message = '';
             $multi_challenge = $errorParams[2];
+            $challenge_msg = $errorParams[3];
             SimpleSAML_Logger::debug("Challenge Response transaction_id: ". $errorParams[1]);
             SimpleSAML_Logger::debug("Challenge Response multi_challenge: " . print_r($multi_challenge, TRUE));
             for ($i = 0; $i < count($multi_challenge); $i++) {
@@ -118,6 +119,7 @@ if (!empty($_REQUEST['username']) || !empty($password)) {
             	$message = $message . ' ' . $multi_challenge[$i]->serial;
             }
             SimpleSAML_Logger::debug("Challenge Response message: " . $message);
+            SimpleSAML_Logger::debug("Challenge Response custom message: ". $challenge_msg);
         }
     }
 }
@@ -144,6 +146,7 @@ if (array_key_exists('forcedUsername', $state)) {
     $t->data['username'] = $state['forcedUsername'];
     $t->data['transaction_id'] = $transaction_id;
     $t->data['chal_resp_message'] = $message;
+    $t->data['chal_resp_custom_msg'] = $challenge_msg;
     $t->data['multi_challenge'] = $multi_challenge;
     $t->data['forceUsername'] = TRUE;
     $t->data['rememberUsernameEnabled'] = FALSE;

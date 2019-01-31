@@ -22,6 +22,7 @@ if(isset($this->data['auth_proc_filter_scenario'])) {
 // First of all we determine how we were called
 $multi_challenge = NULL;
 $chal_resp_message = '';
+$chal_resp_custom_msg = '';
 $hideResponseInput = FALSE;
 $u2fSignRequest = NULL;
 if ($this->data['otp_extra'] == 1){
@@ -34,12 +35,14 @@ if ($this->data['otp_extra'] == 1){
 
 if ($this->data['errorcode'] === "CHALLENGERESPONSE" || $this->data['doChallengeResponse']) {
     $password_text = $this->t('{privacyidea:privacyidea:otp}');
+    SimpleSAML_Logger::debug("data: " . print_r($this->data, TRUE));
     SimpleSAML_Logger::debug("multi_challenge: " . print_r($this->data["multi_challenge"], TRUE));
     $multi_challenge = $this->data['multi_challenge'];
     $chal_resp_message = $this->t('{privacyidea:privacyidea:chal_resp_message}') . $this->data['chal_resp_message'];
+    $chal_resp_custom_msg = $this->data['chal_resp_custom_msg'];
     // check if this is U2F
     SimpleSAML_Logger::debug("u2fSignRequest: " . print_r($u2fSignRequest, TRUE));
-    $hideResponseInput = true;
+    $hideResponseInput = false;
     $u2fSignRequest = false;
     for ($i = 0; $i < count($multi_challenge); $i++) {
         if ($multi_challenge[$i]->type === "u2f") {
@@ -47,6 +50,8 @@ if ($this->data['errorcode'] === "CHALLENGERESPONSE" || $this->data['doChallenge
 	        // not all challenges have hideResponseInput true
 	        if ( ! $multi_challenge[ $i ]->attributes->hideResponseInput ) {
 		        $hideResponseInput = false;
+	        } else {
+	            $hideResponseInput = $multi_challenge[ $i ]->attributes->hideResponseInput;
 	        }
 	        // we have at least one U2F token
 	        if ( $multi_challenge[ $i ]->attributes->u2fSignRequest ) {
@@ -99,7 +104,11 @@ if ($this->data['errorcode'] !== NULL && $this->data['errorcode'] !== "CHALLENGE
         if ($this->data['errorcode'] === "CHALLENGERESPONSE" ||
             $this->data['auth_proc_filter_scenario']) {
             echo '<h2>' . htmlspecialchars($this->t('{privacyidea:privacyidea:login_title_challenge}')) . '</h2>';
-            echo '<p class="logintext">' . htmlspecialchars($this->t('{privacyidea:privacyidea:login_text_challenge}')) . '</p>';
+            if (empty($chal_resp_custom_msg)) {
+                echo '<p class="logintext">' . htmlspecialchars($this->t('{privacyidea:privacyidea:login_text_challenge}')) . '</p>';
+            } else {
+                echo '<p class="logintext">' . htmlspecialchars($chal_resp_custom_msg) . '</p>';
+            }
         } elseif ($this->data['otp_extra'] == 1) {
             echo '<h2>' . htmlspecialchars($this->t('{privacyidea:privacyidea:otp}')) . '</h2>';
             echo '<p class="logintext">' . htmlspecialchars($this->t('{privacyidea:privacyidea:otp_extra_text}')) . '</p>';

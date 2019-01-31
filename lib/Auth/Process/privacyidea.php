@@ -211,6 +211,7 @@ class sspmod_privacyidea_Auth_Process_privacyidea extends SimpleSAML_Auth_Proces
 	    if ( $auth !== true ) {
 		    SimpleSAML_Logger::debug( "Throwing WRONGUSERPASS" );
 		    $detail = $body->detail;
+		    $challenge_msg = $detail->message;
 		    if (property_exists($detail, "multi_challenge")) {
 		    	$multi_challenge = $detail->multi_challenge;
 		    }
@@ -218,7 +219,7 @@ class sspmod_privacyidea_Auth_Process_privacyidea extends SimpleSAML_Auth_Proces
 		    	$transaction_id = $detail->transaction_id;
 			    /* If we have a transaction_id, we do challenge response */
 			    SimpleSAML_Logger::debug( "Throwing CHALLENGERESPONSE" );
-			    throw new SimpleSAML_Error_Error(array("CHALLENGERESPONSE", $transaction_id, $multi_challenge));
+			    throw new SimpleSAML_Error_Error(array("CHALLENGERESPONSE", $transaction_id, $multi_challenge, $challenge_msg));
 		    }
 		    SimpleSAML_Logger::debug( "Throwing WRONGUSERPASS" );
 		    throw new SimpleSAML_Error_Error( "WRONGUSERPASS" );
