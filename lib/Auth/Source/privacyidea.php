@@ -44,6 +44,11 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
      */
     private $otp_extra = 0;
 
+	/**
+     * the enablepinchange, default to False
+     */
+    private $enablepinchange = False;
+	
     /**
      * The attribute map. It is an array
      */
@@ -65,6 +70,11 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
     public function getOtpExtra()
     {
         return $this->otp_extra;
+    }
+	
+	public function getEnablePinChange()
+    {
+        return $this->enablepinchange;
     }
 
     /**
@@ -105,7 +115,9 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
         if (array_key_exists('otpextra', $config)) {
             $this->otp_extra= $config['otpextra'];
         }
-
+		if (array_key_exists('enablepinchange', $config)) {
+            $this->enablepinchange = $config['enablepinchange'];
+        }
     }
 
 
@@ -125,17 +137,21 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
     {
     }
 
-    protected function login_chal_resp($username, $password, $transaction_id, $signaturedata, $clientdata)
+    protected function login_chal_resp($authStateId, $username, $password, $transaction_id, $signaturedata, $clientdata)
     {
         assert('is_string($username)');
         assert('is_string($password)');
         assert('is_string($transaction_id)');
 
+        $state = SimpleSAML_Auth_State::loadState($authStateId, self::STAGEID);
+
         // The parameters in an array do get get urlencoded!
         // But we encode the log data to avoid log execution
         $params = array(
             "user" => $username,
+			"username" => $username,
             "pass" => $password,
+			"password" => $password,
             );
         if (strlen($this->serverconfig['realm']) > 0) {
             $params["realm"] = $this->serverconfig['realm'];
@@ -153,26 +169,77 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
             SimpleSAML_Logger::debug("Authenticating with clientdata: " . urlencode($clientdata));
             $params["clientdata"] = $clientdata;
         }
-        // determine the client IP
-        $headers = $_SERVER;
-        foreach(array("X-Forwarded-For", "HTTP_X_FORWARDED_FOR", "REMOTE_ADDR") as $clientkey) {
-            if (array_key_exists($clientkey, $headers)) {
-                $client_ip = $headers[$clientkey];
-                SimpleSAML_Logger::debug("Using IP from " . $clientkey . ": " . $client_ip);
-                $params["client"] = $client_ip;
-                break;
+
+        //check to see if we have a saved PIN set transaction
+        $send_server_request = true;
+        $new_pin = NULL;
+        if ($this->enablepinchange && $transaction_id) {
+            SimpleSAML_Logger::debug("Checking For Possible PIN Transaction - $transaction_id");
+            if ($state['PI_TransactionID'] === $transaction_id) {
+                SimpleSAML_Logger::debug("Found saved PIN transaction");
+                $pin_transaction = $state['PI_TransactionID'];
+                $body = $state['PI_SavedTransaction'];
+                $subtask = $state['PI_SubTask'];
+                $lastpin = $state['PI_LastPIN'];
+
+                if ($subtask === "pin_set") {
+                    $send_server_request = false;
+                    //send PIN confirmation
+                    $state['PI_SubTask'] = 'pin_confirm';
+                    $state['PI_LastPIN'] = $password;
+                    $id = SimpleSAML_Auth_State::saveState($state, self::STAGEID);
+
+                    SimpleSAML_Logger::debug("Throwing CHALLENGERESPONSE - PIN CONFIRM");
+                    throw new SimpleSAML_Error_Error(array("CHALLENGERESPONSE", $pin_transaction, array(), "\r\nPlease re-enter new PIN:"));
+                } elseif ($subtask === "pin_confirm") {
+                    $send_server_request = false;
+                    //check PINs and save PIN off if valid
+                    if ($lastpin === $password) {
+                        $new_pin = $password;
+                    } else {
+                        //start over with pin_set
+                        $state['PI_SubTask'] = 'pin_set';
+                        $state['PI_LastPIN'] = '';
+                        $id = SimpleSAML_Auth_State::saveState($state, self::STAGEID);
+
+                        SimpleSAML_Logger::debug("Throwing CHALLENGERESPONSE - PIN SET RESTART");
+                        throw new SimpleSAML_Error_Error(array("CHALLENGERESPONSE", $pin_transaction, array(), "\r\nIncorrect PIN confirmation, try again.\r\nEnter a new PIN having from 4 to 8 digits:"));
+                    }
+                } elseif ($subtask === "pin_save") {
+                    SimpleSAML_Logger::debug("Loaded saved PIN");
+                    $new_pin = $lastpin;
+                }
             }
         }
 
-        // Add some debug so we know what we are doing.
-        SimpleSAML_Logger::debug("privacyidea URL:" . $this->serverconfig['privacyideaserver']);
-        SimpleSAML_Logger::debug("user          : " . urlencode($username));
-        SimpleSAML_Logger::debug("transaction_id: " . $transaction_id);
+        if ($send_server_request) {
+            // determine the client IP
+            $headers = $_SERVER;
+            foreach(array("X-Forwarded-For", "HTTP_X_FORWARDED_FOR", "REMOTE_ADDR") as $clientkey) {
+                if (array_key_exists($clientkey, $headers)) {
+                    $client_ip = $headers[$clientkey];
+                    SimpleSAML_Logger::debug("Using IP from " . $clientkey . ": " . $client_ip);
+                    $params["client"] = $client_ip;
+                    break;
+                }
+            }
 
-        $body = sspmod_privacyidea_Auth_utils::curl($params, null, $this->serverconfig, "/validate/samlcheck", "POST");
+            // Add some debug so we know what we are doing.
+            SimpleSAML_Logger::debug("privacyidea URL:" . $this->serverconfig['privacyideaserver']);
+            SimpleSAML_Logger::debug("user          : " . urlencode($username));
+            SimpleSAML_Logger::debug("transaction_id: " . $transaction_id);
 
+            $body = NULL;
+            if ($this->enablepinchange) {
+                $body = sspmod_privacyidea_Auth_utils::curl($params, null, $this->serverconfig, "/auth", "POST");
+            } else {
+                $body = sspmod_privacyidea_Auth_utils::curl($params, null, $this->serverconfig, "/validate/samlcheck", "POST");
+            }
+        }
+		
         $status = True;
         $value = False;
+		$authToken = NULL;
         $multi_challenge = NULL;
         $transaction_id = NULL;
 
@@ -180,8 +247,33 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
             $result = $body->result;
             $detailAttributes = $body->detail;
             SimpleSAML_Logger::debug("privacyidea result:" . print_r($result, True));
-            $status = $result->status;
+			$status = $result->status;
             $value = $result->value->auth;
+			$authToken = $result->value->token;
+			if ($this->enablepinchange) {
+				// check for 4031 as a 'Wrong Credentials' should be allowed to process further
+				if ($result->error->code === 4031) { 
+					$status = True;
+				}
+				// if an auth token exists, the authentication was successful
+				// send a PIN change with the saved and confirmed PIN 
+				if ($authToken) { 
+					SimpleSAML_Logger::debug("privacyidea auth token:" . $authToken);
+					$value = True;
+
+				    //if a PIN was set, send it to the privacyIDEA server
+                    $token_serial = $body->detail->serial;
+				    if ($new_pin && $token_serial) {
+				        SimpleSAML_Logger::debug("privacyidea updating pin:" . $token_serial);
+				        $params = array(
+                                    "serial" => $token_serial,
+                                    "otppin" => $new_pin,
+                                    );
+                        $headers = array("Authorization: $authToken");
+					    $pbody = sspmod_privacyidea_Auth_utils::curl($params, $headers, $this->serverconfig, "/token/setpin", "POST");
+				    }
+				}
+			}
         } catch (Exception $e) {
             throw new SimpleSAML_Error_BadRequest("We were not able to read the response from the privacyidea server.");
         }
@@ -190,9 +282,25 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
             /* We got a valid JSON response, but the STATUS is false */
             throw new SimpleSAML_Error_BadRequest("Valid JSON response, but some internal error occured in privacyidea server.");
         } else {
+            // Determine if a PIN change is required
+            if (property_exists($body,"detail") && property_exists($body->detail,"pin_change")) {
+                $pin_change_requested = $body->detail->pin_change;
+                if ($pin_change_requested === true) {
+                    //save the current response off and trigger a PIN change dialog
+                    $pin_transaction = uniqid();
+                    $body->detail->pin_change = false; // clear this flag so we do not loop the next time through
+                    $state['PI_SavedTransaction'] = $body;
+                    $state['PI_SubTask'] = 'pin_set';
+                    $state['PI_LastPIN'] = '';
+                    $state['PI_TransactionID'] = $pin_transaction;
+                    $id = SimpleSAML_Auth_State::saveState($state, self::STAGEID);
+                    SimpleSAML_Logger::debug("Throwing CHALLENGERESPONSE - PIN SET");
+                    throw new SimpleSAML_Error_Error(array("CHALLENGERESPONSE", $pin_transaction, array(), "\r\nEnter a new PIN having from 4 to 8 digits:"));
+                }
+            }
+
             /* The STATUS is true, so we need to check the value */
             if ($value !== True) {
-                SimpleSAML_Logger::debug("Throwing WRONGUSERPASS");
                 $detail = $body->detail;
                 $challenge_msg = $detail->message;
                 if (property_exists($detail, "multi_challenge")) {
@@ -201,13 +309,36 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
 
                 if (property_exists($detail, "transaction_id")) {
                 	$transaction_id = $detail->transaction_id;
+
+                	if ($new_pin) {
+                        SimpleSAML_Logger::debug("privacyidea storing pin for transaction: " . $transaction_id);
+                        $state['PI_SubTask'] = 'pin_save';
+                        $state['PI_TransactionID'] = $transaction_id;
+                        $id = SimpleSAML_Auth_State::saveState($state, self::STAGEID);
+                    }
+
                     /* If we have a transaction_id, we do challenge response */
                     SimpleSAML_Logger::debug("Throwing CHALLENGERESPONSE");
                     throw new SimpleSAML_Error_Error(array("CHALLENGERESPONSE", $transaction_id, $multi_challenge, $challenge_msg));
                 }
                 SimpleSAML_Logger::debug("Throwing WRONGUSERPASS");
                 throw new SimpleSAML_Error_Error("WRONGUSERPASS");
-            }
+            } else {
+				// The authentication was successful, but for PinChange logins we need to retrieve the user's details
+				if ($this->enablepinchange) {
+					$username = $result->value->username;
+					$realm = $result->value->realm;
+					$headers = array("Authorization: $authToken");
+					$ubody = sspmod_privacyidea_Auth_utils::curl(null, $headers, $this->serverconfig, "/user/?realm=$realm&username=$username", "GET");
+					$uresult = $ubody->result;
+					SimpleSAML_Logger::debug("privacyidea user result:" . print_r($uresult->value, True));
+					if ($uresult->value) {
+						foreach ($uresult->value[0] as $k => $v) {
+							$result->value->$k = $v;
+						}
+					}
+				}				
+			}
         }
 
         $user_attributes = $result->value->attributes;
@@ -243,7 +374,9 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
                         $attributes[$mapped_key] = array($attribute_value);
                     }
                     SimpleSAML_Logger::debug("privacyidea      value: " . print_r($attributes[$mapped_key], TRUE));
-                }
+                } else {
+					 SimpleSAML_Logger::debug("privacyidea No Happy $key: " . $user_attributes->username);
+				}
             } else {
                 // We have no keymapping and just transfer the attribute
                 SimpleSAML_Logger::debug("privacyidea unmapped key: " . $key);
@@ -370,7 +503,7 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
 
         /* Attempt to log in. */
         try {
-            $attributes = $source->login_chal_resp($username, $password, $transaction_id, $signaturedata, $clientdata);
+            $attributes = $source->login_chal_resp($authStateId, $username, $password, $transaction_id, $signaturedata, $clientdata);
         } catch (Exception $e) {
             SimpleSAML_Logger::stats('Unsuccessful login attempt from ' . $_SERVER['REMOTE_ADDR'] . '.');
             throw $e;

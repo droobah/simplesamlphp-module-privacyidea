@@ -65,7 +65,14 @@ You need to add the authentication source 'privacyidea:privacyidea' to
          * 1: Password field for password and extra field for OTP
          */
         'otpextra' => 1,
-        
+
+        /*
+         * Setting this to True will allow an expired/initial PIN to
+         * be changed at login.
+         * Optional.
+         */
+        'enablepinchange' => False,
+
         /*
          * This is the translation from privacyIDEA attribute names to 
          * SAML attribute names.
