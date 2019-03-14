@@ -13,7 +13,8 @@ if(isset($this->data['auth_proc_filter_scenario'])) {
 // First of all we determine how we were called
 $multi_challenge = NULL;
 if (isset($this->data['chal_resp_message'])) {
-	$chal_resp_message = $this->t('{privacyidea:privacyidea:chal_resp_message}') . $this->data['chal_resp_message'];
+	$chal_resp_message = $this->data['use_u2f'] ? $this->t('{privacyidea:privacyidea:chal_resp_message}') : "";
+	$chal_resp_message .= $this->data['chal_resp_message'];
 } else {
     $chal_resp_message = "";
 }
@@ -162,7 +163,7 @@ if ($this->data['errorcode'] !== NULL && $this->data['errorcode'] !== "CHALLENGE
                             In case of challenge response with the U2F, we hide the password.
                             -->
                             <?php
-                            echo '<td style="padding: .3em;" colspan="2">' . htmlspecialchars($chal_resp_message) . '</td>';
+                            echo '<td style="padding: .3em;" colspan="2">' . nl2br(htmlspecialchars($chal_resp_message)) . '</td>';
                             if (!$hideResponseInput || $this->data['use_otp']){
                                 // normal login
 	                            if (isset($this->data['tokenQR'])) {

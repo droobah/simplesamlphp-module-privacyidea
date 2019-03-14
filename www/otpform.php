@@ -71,19 +71,27 @@
 		$triggerChallenge = $state['privacyidea:privacyidea:checkTokenType'];
 		if ($triggerChallenge['use_u2f']) {
 			$doChallengeResponse = true;
+			$use_u2f = true;
 		}
 		if ($triggerChallenge['use_otp']) {
 			$use_otp = true;
 		}
 		$transaction_id = $triggerChallenge['transaction_id'];
 		$message = '';
+		$utf_serials = '';
+		$challenge_msgs = array();
 		$multi_challenge = $triggerChallenge['multi_challenge'];
 		SimpleSAML_Logger::debug("Challenge Response transaction_id: ". $transaction_id);
 		SimpleSAML_Logger::debug("Challenge Response multi_challenge: " . print_r($multi_challenge, TRUE));
 		for ($i = 0; $i < count($multi_challenge); $i++) {
 			SimpleSAML_Logger::debug("Token serial " . $i . ": " . print_r($multi_challenge[$i]->serial, TRUE));
-			$message = $message . ' ' . $multi_challenge[$i]->serial;
+			if ($multi_challenge[$i]->type === "u2f" || $multi_challenge[$i]->message === "") {
+			    $utf_serials = $utf_serials . ' \n' . $multi_challenge[$i]->serial;
+			} else {
+			    $challenge_msgs[] = $multi_challenge[$i]->message;
+			}
 		}
+		$message = $utf_serials . "\n" . implode("\n or ",$challenge_msgs);
 	}
 
 	$cfg = SimpleSAML_Configuration::getInstance();
@@ -126,7 +134,8 @@
 			$sessionHandler = SimpleSAML_SessionHandler::getSessionHandler();
 			$params = $sessionHandler->getCookieParams();
 			$params['expire'] = time();
-			$params['expire'] += (isset($_REQUEST['remember_username']) && $_REQUEST['remember_username'] === 'Yes' ? 31536000 : -300);
+			$params['expire'] += (
+			($_REQUEST['remember_username']) && $_REQUEST['remember_username'] === 'Yes' ? 31536000 : -300);
 			SimpleSAML_Utilities::setCookie($source->getAuthId() . '-username', $username, $params, FALSE);
 		}
 
@@ -163,6 +172,11 @@
 		$tpl->data['use_otp'] = true;
 	} else {
 		$tpl->data['use_otp'] = false;
+	}
+	if (isset($use_u2f)){
+		$tpl->data['use_u2f'] = true;
+	} else {
+		$tpl->data['use_u2f'] = false;
 	}
 	if (isset($state['privacyidea:privacyidea:checkTokenType'])) {
 		$tpl->data['transaction_id'] = $transaction_id;
