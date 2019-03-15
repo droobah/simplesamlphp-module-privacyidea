@@ -68,6 +68,13 @@ You need to add the authentication source 'privacyidea:privacyidea' to
     'otpextra' => 1,
         
     /*
+     * Enable Pin Change
+     * 0: (default) user will not be notified to change their PIN
+     * 1: User will be prompted to change an expired PIN
+     */
+    'enablepinchange' => 1,
+     
+    /*
      * This is the translation from privacyIDEA attribute names to 
      * SAML attribute names.
      * Optional.

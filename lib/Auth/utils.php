@@ -114,6 +114,7 @@ class sspmod_privacyidea_Auth_utils {
 	public function checkTokenType($state, $body) {
 		$detail = $body->detail;
 		$multi_challenge = $detail->multi_challenge;
+		$expired_pins = array();
 		$use_u2f = false;
 		$use_otp = false;
 		for ($i = 0; $i < count($multi_challenge); $i++) {
@@ -122,16 +123,23 @@ class sspmod_privacyidea_Auth_utils {
 			} else {
 				$use_otp = true;
 			}
+            if ($multi_challenge[$i]->pin_change) {
+                $expired_pins[] = $multi_challenge[$i]->serial;
+            }
 		}
 		$state['privacyidea:privacyidea:checkTokenType'] = array(
 			"transaction_id" => $detail->transaction_id,
 			"multi_challenge" => $multi_challenge,
+			"expired_pins" => $expired_pins,
 		);
 		if ($use_u2f === true) {
 			SimpleSAML_Logger::debug("privacyIDEA: The user has u2f token");
 		}
 		if ($use_otp === true) {
 			SimpleSAML_Logger::debug("privacyIDEA: The user has otp token");
+		}
+		if (count($expired_pins)) {
+		    SimpleSAML_Logger::debug("privacyIDEA: The user has expired PINs: " . print_r($expired_pins,TRUE));
 		}
 		$state['privacyidea:privacyidea:checkTokenType']['use_u2f'] = $use_u2f;
 		$state['privacyidea:privacyidea:checkTokenType']['use_otp'] = $use_otp;

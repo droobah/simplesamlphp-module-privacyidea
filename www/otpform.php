@@ -93,6 +93,11 @@
 		}
 		$message = $utf_serials . "\n" . implode("\n or ",$challenge_msgs);
 	}
+	$doPinChange = false;
+	if (isset($state['privacyidea:privacyidea:pinChange'])) {
+        $doPinChange = true;
+        $doChallengeResponse = false;
+	}
 
 	$cfg = SimpleSAML_Configuration::getInstance();
 	$tpl = new SimpleSAML_XHTML_Template($cfg, 'privacyidea:loginform.php');
@@ -166,6 +171,7 @@
 	}
 
 	$tpl->data['doChallengeResponse'] = $doChallengeResponse;
+	$tpl->data['doPinChange'] = $doPinChange;
 	$tpl->data['errorcode'] = $errorCode;
 	$tpl->data['errorparams'] = $errorParams;
 	if (isset($use_otp)){

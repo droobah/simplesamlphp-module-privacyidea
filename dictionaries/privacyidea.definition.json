@@ -40,5 +40,14 @@
 	},
 	"tryAgain": {
 		"en": "Try Again"
+	},
+	"expiredPIN": {
+		"en": "Enter a new PIN having from 4 to 8 digits: "
+	},
+	"newPIN": {
+		"en": "New PIN"
+	},
+	"confirmPIN": {
+		"en": "Confirm PIN"
 	}
 }

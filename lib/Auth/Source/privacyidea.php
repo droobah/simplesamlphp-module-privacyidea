@@ -45,6 +45,11 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
     private $otp_extra = 0;
 
     /**
+     * the enablepinchange, default to 0
+     */
+    private $enablepinchange = 0;
+
+    /**
      * The attribute map. It is an array
      */
 
@@ -103,9 +108,11 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
 	    	$this->concatenationmap = $config['concatenationmap'];
 	    }
         if (array_key_exists('otpextra', $config)) {
-            $this->otp_extra= $config['otpextra'];
+            $this->otp_extra = $config['otpextra'];
         }
-
+        if (array_key_exists('enablepinchange', $config)) {
+            $this->enablepinchange = $config['enablepinchange'];
+        }
     }
 
 
@@ -125,6 +132,34 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
     {
     }
 
+    private function set_pin($auth_token, $token_serial, $pin) {
+        SimpleSAML_Logger::debug("privacyidea updating pin: " . $token_serial);
+        $params = array(
+                        "serial" => $token_serial,
+                        "otppin" => $pin,
+                        );
+        $headers = array("Authorization: $auth_token");
+        $pbody = sspmod_privacyidea_Auth_utils::curl($params, $headers, $this->serverconfig, "/token/setpin", "POST");
+    }
+
+    private function load_user_attributes($auth_token, $username, $realm) {
+        $headers = array("Authorization: $auth_token");
+        $params = array();
+        $ubody = sspmod_privacyidea_Auth_utils::curl($params, $headers, $this->serverconfig, "/user/?realm=$realm&username=$username", "GET");
+        $uresult = $ubody->result;
+        SimpleSAML_Logger::debug("privacyidea user result:" . print_r($uresult->value, True));
+
+        $result = (object) ['value' => (object) [ 'attributes' => (object)[] ] ];
+        $result->value->attributes->realm = $realm;
+
+        if ($uresult->value) {
+            foreach ($uresult->value[0] as $k => $v) {
+                $result->value->attributes->$k = $v;
+            }
+        }
+        return $result;
+    }
+
     protected function login_chal_resp($state, $username, $password, $transaction_id, $signaturedata, $clientdata)
     {
         assert('is_string($username)');
@@ -135,7 +170,9 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
         // But we encode the log data to avoid log execution
         $params = array(
             "user" => $username,
+            "username" => $username,
             "pass" => $password,
+            "password" => $password,
             );
         if (strlen($this->serverconfig['realm']) > 0) {
             $params["realm"] = $this->serverconfig['realm'];
@@ -169,21 +206,85 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
         SimpleSAML_Logger::debug("user          : " . urlencode($username));
         SimpleSAML_Logger::debug("transaction_id: " . $transaction_id);
 
-        $body = sspmod_privacyidea_Auth_utils::curl($params, null, $this->serverconfig, "/validate/samlcheck", "POST");
+        $send_server_request = true;
+        if ($this->enablepinchange) {
+            //check to see if we already have a PIN response
+            if (isset($state['privacyidea:privacyidea:pinChange'])) {
+                if (!is_numeric($password) || strlen($password) < 4) {
+                    //retry the PIN set as data sent was invalid
+                    $url = SimpleSAML_Module::getModuleURL('privacyidea/otpform.php');
+                    SimpleSAML_Utilities::redirectTrustedURL($url, array('StateId' => $id));
+                    return true;
+                }
+
+                $auth_token = $state['privacyidea:privacyidea:pinChange']['token'];
+                $token_serial = $state['privacyidea:privacyidea:pinChange']['serial'];
+                $this->set_pin($auth_token, $token_serial, $password);
+            } else {
+                $body = sspmod_privacyidea_Auth_utils::curl($params, null, $this->serverconfig, "/auth", "POST");
+            }
+        } else {
+            $body = sspmod_privacyidea_Auth_utils::curl($params, null, $this->serverconfig, "/validate/samlcheck", "POST");
+        }
 
         $status = True;
         $value = False;
+        $realm = NULL;
+        $auth_token = NULL;
         $multi_challenge = NULL;
         $transaction_id = NULL;
 
-        try {
-            $result = $body->result;
-            $detailAttributes = $body->detail;
-            SimpleSAML_Logger::debug("privacyidea result:" . print_r($result, True));
-            $status = $result->status;
-            $value = $result->value->auth;
-        } catch (Exception $e) {
-            throw new SimpleSAML_Error_BadRequest("We were not able to read the response from the privacyidea server.");
+        if (isset($state['privacyidea:privacyidea:pinChange'])) {
+            //authentication was already successful and PIN is now set
+            $status = true;
+            $value = true;
+
+            $realm = $state['privacyidea:privacyidea:pinChange']['realm'];
+            $auth_token = $state['privacyidea:privacyidea:pinChange']['token'];
+            $token_serial = $state['privacyidea:privacyidea:pinChange']['serial'];
+        } else {
+            try {
+                $result = $body->result;
+                $detailAttributes = $body->detail;
+                SimpleSAML_Logger::debug("privacyidea result:" . print_r($result, True));
+                $status = $result->status;
+                $value = $result->value->auth;
+
+                if ($this->enablepinchange) {
+                    // check for 4031 as a 'Wrong Credentials' should be allowed to process further
+                    if ($result->error->code === 4031) {
+                        $status = True;
+                    }
+                    // if an auth token exists, the authentication was successful
+                    // send a PIN change with the saved and confirmed PIN
+                    if (property_exists($result->value, "token")) {
+                        $value = True;
+                        $auth_token = $result->value->token;
+                        SimpleSAML_Logger::debug("privacyidea auth token:" . $auth_token);
+
+                        //if a PIN change is required, update the state to display a PIN change prompt
+                        if (property_exists($body->detail, "serial")) {
+                            $token_serial = $body->detail->serial;
+                            $realm = $result->value->realm;
+                            $expired_pins = $state['privacyidea:privacyidea:checkTokenType']['expired_pins'];
+                            if (in_array($token_serial, $expired_pins, true)) {
+                                $state['privacyidea:privacyidea:pinChange'] = array(
+                                    "token" => $auth_token,
+                                    "serial" => $token_serial,
+                                    "realm" => $realm,
+                                );
+
+                                $id  = SimpleSAML_Auth_State::saveState($state, 'privacyidea:privacyidea:init');
+                                $url = SimpleSAML_Module::getModuleURL('privacyidea/otpform.php');
+                                SimpleSAML_Utilities::redirectTrustedURL($url, array('StateId' => $id));
+                                return true;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+                throw new SimpleSAML_Error_BadRequest("We were not able to read the response from the privacyidea server.");
+            }
         }
 
         if ($status !== True) {
@@ -207,6 +308,10 @@ class sspmod_privacyidea_Auth_Source_privacyidea extends sspmod_core_Auth_UserPa
                 } else {
 					throw new SimpleSAML_Error_Error("WRONGUSERPASS");
 				}
+            } else {
+                if ($this->enablepinchange) {
+                    $result = $this->load_user_attributes($auth_token, $token_serial, $realm);
+                }
             }
         }
 

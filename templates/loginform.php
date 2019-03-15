@@ -57,6 +57,17 @@ if ($u2fSignRequest) {
     $this->data['head'] .= '<script type="text/javascript" src="' . htmlspecialchars(SimpleSAML_Module::getModuleUrl('privacyidea/js/u2f.js')) . '"></script>';
 }
 
+if ($this->data['doPinChange']) {
+    // clear some values in order to hide inputs on the page
+    $chal_resp_message = "";
+    $this->data["otp_extra"] = 0;
+    $hideResponseInput = true;
+    $this->data['use_otp'] = false;
+
+    // Add javascript for PIN validation
+    $this->data['head'] .= '<script type="text/javascript" src="' . htmlspecialchars(SimpleSAML_Module::getModuleUrl('privacyidea/js/pinchange.js')) . '"></script>';
+}
+
 $this->data['header'] = $this->t('{privacyidea:privacyidea:header}');
 if (strlen($this->data['username']) > 0) {
     $this->data['autofocus'] = 'password';
@@ -195,7 +206,23 @@ if ($this->data['errorcode'] !== NULL && $this->data['errorcode'] !== "CHALLENGE
                                 }
                             ?>
                         </div>
-
+                        <div class="identifier-shown">
+                            <?php
+                                if ($this->data['doPinChange']) {
+                                    echo '<td style="padding: .3em;" colspan="2">' . htmlspecialchars($this->t('{privacyidea:privacyidea:expiredPIN}')) . '</td>';
+                                    echo '<label for="PIN">';
+                                    echo '<input type="password" id="PIN" tabindex="2" name="password"  maxlength="8" ';
+                                    echo ' placeholder="' . htmlspecialchars($this->t('{privacyidea:privacyidea:newPIN}')) . '" ';
+                                    echo ' onkeypress="return isnumber(event);" onkeyup="validatepin();" onload="togglesubmit(false);" />';
+                                    echo '</label>';
+                                    echo '<label for="ConfirmPIN">';
+                                    echo '<input type="password" id="ConfirmPIN" tabindex="3" name="confirmpassword" maxlength="8" ';
+                                    echo ' placeholder="' . htmlspecialchars($this->t('{privacyidea:privacyidea:confirmPIN}')) . '" ';
+                                    echo ' onkeypress="return isnumber(event);" onkeyup="validatepin();" />';
+                                    echo '</label>';
+                                }
+                            ?>
+                        </div>
                 <?php
                 if (array_key_exists('organizations', $this->data)) {
                     ?>
@@ -281,7 +308,7 @@ if ($u2fSignRequest) {
     echo '<script type="text/javascript">';
     if (isset($this->data['enrollU2F'])) {
         for ($i = 0; $i < count($multi_challenge); $i++) {
-            if ($multi_challenge[$i]->serial = $this->data['serial']) {
+            if ($multi_challenge[$i]->serial == $this->data['serial']) {
                 $attributes = $multi_challenge[$i]->attributes;
                 $u2fSignRequest = $attributes->u2fSignRequest;
             }
